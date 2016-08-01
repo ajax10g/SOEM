@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <signal.h>
 
+#define NSEC_PER_SEC 1000000000
 #define EC_TIMEOUTMON 500
 
 char IOmap[4096];
@@ -35,7 +36,7 @@ uint8 currentgroup = 0;
 
 /*clpham:*/
 /* #define CYCLIC_INTERVAL_US 3000 */
-#define CYCLIC_INTERVAL_US 10000
+#define CYCLIC_INTERVAL_US 5000
 #define NUM_SUBOBJ_DO 13
 #define NUM_SUBOBJ_AO 16
 #define NUM_SUBOBJ_DI 13
@@ -71,6 +72,7 @@ OSAL_THREAD_HANDLE thread2;
 extern void setPdoRx(uint16 slave_no, uint8 module_index, tPdoRx *p);
 extern void graceExit(void);
 extern OSAL_THREAD_FUNC showStats( void *ptr );
+extern void add_timespec(struct timespec *ts, int64 addtime);
 
 void simpletest(char *ifname)
 {
@@ -135,8 +137,25 @@ void simpletest(char *ifname)
          if (ec_slave[0].state == EC_STATE_OPERATIONAL )
          {
             printf("Operational state reached for all slaves.\n");
-			printf("Sending Process Data every %d ms...\n", CyclicIntervalUs/1000);
+			printf("Sending Process Data every %d us...\n", CyclicIntervalUs/1);
             inOP = TRUE;
+
+
+
+struct timespec   ts, tleft;
+int ht;
+int64 cycletime;
+
+clock_gettime(CLOCK_MONOTONIC, &ts);
+ht = (ts.tv_nsec / 1000000) + 1; /* round to nearest ms */
+ts.tv_nsec = ht * 1000000;
+cycletime = CyclicIntervalUs * 1000; /* cycletime in ns */
+int64 toff = 0;
+/* dorun = 0; */
+
+
+
+
                 /* cyclic loop */
             /* for(i = 1; i <= 10000; i++) */
             for(i = 1;; i++)
@@ -254,7 +273,12 @@ void simpletest(char *ifname)
                wkc = ec_receive_processdata(EC_TIMEOUTRET);
 
 
-                    osal_usleep(CyclicIntervalUs);/*clpham: was=5000*/
+                    /* osal_usleep(CyclicIntervalUs);#<{(|clpham: was=5000|)}># */
+/* calculate next cycle start */
+add_timespec(&ts, cycletime + toff);
+/* wait to cycle start */
+clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, &tleft);
+
                 }
                 inOP = FALSE;
             }
@@ -365,7 +389,7 @@ OSAL_THREAD_FUNC ecatcheck( void *ptr )
                /* printf("OK : all slaves resumed OPERATIONAL.\n"); */
 			}
         }
-        osal_usleep(1000);/*clpham:was=10000*/
+        osal_usleep(10000);/*clpham:was=10000*/
     }
 }
 
@@ -395,7 +419,7 @@ int main(int argc, char *argv[])
 
 	  /*clpham:*/
 	  if(argc>2){
-		  CyclicIntervalUs = atoi(argv[2])*1000;
+		  CyclicIntervalUs = atoi(argv[2])*1; /*argv[2] in units of us*/
 	  }else
 		CyclicIntervalUs = CYCLIC_INTERVAL_US;
 
@@ -511,4 +535,21 @@ OSAL_THREAD_FUNC showStats( void *ptr ){
 		CursorShow();
 		osal_usleep(10000);/*us*/
 	}
+}
+
+/* add ns to timespec */
+void add_timespec(struct timespec *ts, int64 addtime)
+{
+   int64 sec, nsec;
+
+   nsec = addtime % NSEC_PER_SEC;
+   sec = (addtime - nsec) / NSEC_PER_SEC;
+   ts->tv_sec += sec;
+   ts->tv_nsec += nsec;
+   if ( ts->tv_nsec > NSEC_PER_SEC )
+   {
+      nsec = ts->tv_nsec % NSEC_PER_SEC;
+      ts->tv_sec += (ts->tv_nsec - nsec) / NSEC_PER_SEC;
+      ts->tv_nsec = nsec;
+   }
 }
