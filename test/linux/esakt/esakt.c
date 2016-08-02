@@ -318,6 +318,15 @@ OSAL_THREAD_FUNC ecatcheck( void *ptr )
 {
     int slave;
 
+struct timespec   ts, tleft;
+int ht;
+int64 cycletime;
+
+clock_gettime(CLOCK_MONOTONIC, &ts);
+ht = (ts.tv_nsec / 1000000) + 1; /* round to nearest ms */
+ts.tv_nsec = ht * 1000000;
+cycletime = 1000000; /* cycletime in ns */
+int64 toff = 0;
 
     while(keepRunning)
     {
@@ -389,7 +398,11 @@ OSAL_THREAD_FUNC ecatcheck( void *ptr )
                /* printf("OK : all slaves resumed OPERATIONAL.\n"); */
 			}
         }
-        osal_usleep(10000);/*clpham:was=10000*/
+        /* osal_usleep(10000);#<{(|clpham:was=10000|)}># */
+/* calculate next cycle start */
+add_timespec(&ts, cycletime + toff);
+/* wait to cycle start */
+clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, &tleft);
     }
 }
 
@@ -533,7 +546,7 @@ OSAL_THREAD_FUNC showStats( void *ptr ){
 			graceExit();
 
 		CursorShow();
-		osal_usleep(10000);/*us*/
+		osal_usleep(50000);/*us*/
 	}
 }
 
