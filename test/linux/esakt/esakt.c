@@ -21,6 +21,7 @@
 /* #include <stdint.h> */
 #include <stdlib.h>
 #include <signal.h>
+#include <locale.h> /*for digit grouping print*/
 
 #define NSEC_PER_SEC 1000000000
 #define EC_TIMEOUTMON 500
@@ -55,6 +56,7 @@ static uint32 CyclicIntervalUs = CYCLIC_INTERVAL_US;
 static boolean keepRunning = TRUE;
 static boolean ShowStats = TRUE;
 OSAL_THREAD_HANDLE thread2;
+static DeltaTimeNS = 0;
 
 /*Cursor addressing*/
 #define ESC 27
@@ -73,12 +75,15 @@ extern void setPdoRx(uint16 slave_no, uint8 module_index, tPdoRx *p);
 extern void graceExit(void);
 extern OSAL_THREAD_FUNC showStats( void *ptr );
 extern void add_timespec(struct timespec *ts, int64 addtime);
+extern struct timespec deltaTime(struct timespec start, struct timespec end);
 
 void simpletest(char *ifname)
 {
     int i, j, oloop, iloop, chk;
     needlf = FALSE;
     inOP = FALSE;
+
+	struct timespec startTime, endTime;
 
    printf("Starting simple test\n");
 
@@ -137,7 +142,7 @@ void simpletest(char *ifname)
          if (ec_slave[0].state == EC_STATE_OPERATIONAL )
          {
             printf("Operational state reached for all slaves.\n");
-			printf("Sending Process Data every %d us...\n", CyclicIntervalUs/1);
+			printf("Sending Process Data every %'dus...\n", CyclicIntervalUs/1);
             inOP = TRUE;
 
 
@@ -160,6 +165,9 @@ int64 toff = 0;
             /* for(i = 1; i <= 10000; i++) */
             for(i = 1;; i++)
             {
+			
+				clock_gettime(CLOCK_MONOTONIC, &startTime);
+				
 				/*Quick test on the Fab9 box*/
 				static tPdoRx pdoRx = {0, 0, 0};
 				tPdoTx pdoTx;
@@ -278,6 +286,9 @@ int64 toff = 0;
 add_timespec(&ts, cycletime + toff);
 /* wait to cycle start */
 clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, &tleft);
+
+				clock_gettime(CLOCK_MONOTONIC, &endTime);
+				DeltaTimeNS = (int)deltaTime(startTime, endTime).tv_nsec;
 
                 }
                 inOP = FALSE;
@@ -413,6 +424,8 @@ void ctrlCHandler(int dummy){
 
 int main(int argc, char *argv[])
 {
+	setlocale(LC_ALL, ""); /*for digit grouping*/
+
 	/*Capture the ctrl-c*/
 	signal(SIGINT, ctrlCHandler);
 
@@ -511,7 +524,8 @@ OSAL_THREAD_FUNC showStats( void *ptr ){
 			}
 
 			CursorRestorePos();
-			printf("Processdata cycle %4d, WKC %d, T %"PRId64"\n", i, wkc, ec_DCtime);
+			printf("Processdata cycle %4d, WKC %d, T %"PRId64", Cycle interval %'10dns\n",
+					i, wkc, ec_DCtime, DeltaTimeNS/1);
 			printf(" LEDs  =0x%02x", pPdoRx->led);
 
 			if(1){
@@ -565,4 +579,16 @@ void add_timespec(struct timespec *ts, int64 addtime)
       ts->tv_sec += (ts->tv_nsec - nsec) / NSEC_PER_SEC;
       ts->tv_nsec = nsec;
    }
+}
+
+struct timespec deltaTime(struct timespec start, struct timespec end){
+	struct timespec t;
+	if((end.tv_nsec - start.tv_nsec) <0){
+		t.tv_sec = end.tv_sec - start.tv_sec-1;
+		t.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+	}else{
+		t.tv_sec = end.tv_sec - start.tv_sec;
+		t.tv_nsec = end.tv_nsec - start.tv_nsec;
+	}
+	return t;
 }
