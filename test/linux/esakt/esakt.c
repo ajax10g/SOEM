@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <locale.h> /*for digit grouping print*/
+#include <unistd.h>
 
 #define NSEC_PER_SEC 1000000000
 #define EC_TIMEOUTMON 500
@@ -56,7 +57,7 @@ static uint32 CyclicIntervalUs = CYCLIC_INTERVAL_US;
 static boolean keepRunning = TRUE;
 static boolean ShowStats = TRUE;
 OSAL_THREAD_HANDLE thread2;
-static DeltaTimeNS = 0;
+static int DeltaTimeNS = 0;
 
 /*Cursor addressing*/
 #define ESC 27
