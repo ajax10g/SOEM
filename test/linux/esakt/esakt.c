@@ -41,7 +41,7 @@ uint8 currentgroup = 0;
 #define CYCLIC_INTERVAL_US 5000
 #define NUM_SUBOBJ_DO 13
 #define NUM_SUBOBJ_AO 16
-#define NUM_SUBOBJ_DI 13
+#define NUM_SUBOBJ_DI NUM_SUBOBJ_DO
 #define NUM_SUBOBJ_AI 64
 typedef struct PACKED{
 	uint8 led;
@@ -99,7 +99,7 @@ void simpletest(char *ifname)
       {
          printf("%d slaves found and configured.\n",ec_slavecount);
 
-#if 0
+#if 1
 		 /*clpham: avoid using LRW, which is not support by the TI SDK v.1.0.6*/
 		 for(i = 1; i<=ec_slavecount ; i++)
 			 ec_slave[i].blockLRW = TRUE;
@@ -160,6 +160,20 @@ int64 toff = 0;
 /* dorun = 0; */
 
 
+/*clpham: clear MaxAgeDO*/
+char usdo[52*sizeof(uint32)];
+memset(&usdo, 0, sizeof(usdo));
+#if 1
+ec_SDOwrite(
+		1/*slave#*/,
+		0xa000/*object index*/,
+		1/*object subindex*/,
+		TRUE/*CA*/,
+		sizeof(usdo)/*psize*/,
+		(void *)&usdo/*p*/,
+		EC_TIMEOUTRXM);
+#endif
+
 
 
                 /* cyclic loop */
@@ -170,53 +184,80 @@ int64 toff = 0;
 				clock_gettime(CLOCK_MONOTONIC, &startTime);
 				
 				/*Quick test on the Fab9 box*/
-				static tPdoRx pdoRx = {0, 0, 0};
+				static tPdoRx pdoRx =
+				{	0,
+					{0,0,0,0,0,0,0,0,0,0,0,0,0},
+					{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+				};
 				tPdoTx pdoTx;
 				tPdoRx *pPdoRx = &pdoRx;
 				tPdoTx *pPdoTx = &pdoTx;
 				static unsigned int i2=0;
 				static boolean reverseDO[NUM_SUBOBJ_DO];
 				static boolean reverseAO[NUM_SUBOBJ_AO];
-#if 0
-				struct timespec ts;
-				static uint32 pktIdx = 0;
-				clock_gettime(CLOCK_REALTIME, &ts);
-				static unsigned long ms =0;
-				ms = (ts.tv_nsec/1000000) - ms;
-				pPdoRx->DO[0] = (uint32)ms;
-				pPdoRx->DO[1] = pktIdx++;
-#endif
-
-#if 0
-				/*Write 0xD0D01111-0xD0D0DDDD to DO[31:0]-DO[415:384]*/
-				int idx;
-				for(idx=0; idx<NUM_SUBOBJ_DO; idx++){
-					uint32 subi = idx+0;
-					uint32 v= 0xd0d00000 + (subi<<3*4)+(subi<<2*4)+(subi<<1*4)+(subi<<0*4); /*=D0D01111:D0D0DDDD*/
-					pPdoRx->DO[idx] =v;
-					/* printf("DO[%2d]=0x%08x\n", idx, pPdoRx->DO[idx]); */
-				}
-
-				/*Write 0xA011-0xA0DD to AO0-AO15*/
-				for(idx=0; idx<NUM_SUBOBJ_AO; idx++){
-					uint16 subi = idx+0;
-					uint16 v = 0xa000 + (subi<<1*4)+(subi<<0*4); /*=A011:A0DD*/
-					pPdoRx->AO[idx] = v;
-					/* printf("AO[%2d]=0x%04x\n", idx, pPdoRx->AO[idx]); */
-				}
-#endif
-
 #if 1
 				/*DOs*/
 				/* Bit walk the onboard LEDs and the DOs */
 				//if(i>(i2+20)){/*Slow down the speed of the walking LEDs*/
 				if(1){
 					int brdIdx;
+					union digitalOutTag{
+						uint32 d32;
+						struct bitFields{
+							boolean bit0:1;
+							boolean bit1:1;
+							boolean bit2:1;
+							uint32 reservedBits:29;
+						}bits;
+					}nxtDO, prevDI;
+					uint32 prevDO;
 
 					/*Re-init LED test values*/
 					if(pPdoRx->led==0)
 						pPdoRx->led = 1;
 
+	/*clpham: DI latency measurements*/
+	#if 1
+					wkc = ec_receive_processdata(EC_TIMEOUTRET);
+					pPdoTx = (tPdoTx *)ec_slave[0].inputs;
+					int pdoIndx;
+					/*DO*/
+					for(pdoIndx=0; pdoIndx<NUM_SUBOBJ_DO; pdoIndx++){
+						/*Toggle DO[pdoIndx]'s bit 0'*/
+						prevDO = pPdoRx->DO[pdoIndx];
+						nxtDO.d32 = prevDO;
+						nxtDO.bits.bit0 = ~nxtDO.bits.bit0;
+
+						/*Update DO[0][2] with DI[0][1]*/
+						/* wkc = ec_receive_processdata(EC_TIMEOUTRET); */
+						/* pPdoTx = (tPdoTx *)ec_slave[0].inputs; */
+						prevDI.d32 = pPdoTx->DI[pdoIndx];
+						nxtDO.bits.bit2 = prevDI.bits.bit0;
+						pPdoRx->DO[pdoIndx] = nxtDO.d32;
+					}
+					/*AO*/
+					uint16 prevAO, nxtAO, prevAI;
+					/* for(pdoIndx=0; pdoIndx<NUM_SUBOBJ_AO; pdoIndx++){ */
+					for(pdoIndx=0; pdoIndx<=8; pdoIndx+=8){
+						/*Toggle AO0, AO8 0V<->10V*/
+						prevAO = pPdoRx->AO[pdoIndx];
+
+						/*Update AO1 (or AO9) with AI0 (or AI32)*/
+						/* wkc = ec_receive_processdata(EC_TIMEOUTRET); */
+						/* pPdoTx = (tPdoTx *)ec_slave[0].inputs; */
+						nxtAO = pPdoTx->AI[pdoIndx*4];
+						pPdoRx->AO[pdoIndx+1] = nxtAO;
+						
+
+						pPdoRx->AO[pdoIndx] = (prevAO==0) ? 0x7fff : 0;
+					}
+
+					setPdoRx(1, 0, pPdoRx);
+
+					/* Walk to the next LED bit */
+					pPdoRx->led <<=1; 
+	#endif
+	#if 0
 					/*Re-init DO test values*/
 					for(brdIdx=0; brdIdx<NUM_SUBOBJ_DO; brdIdx++){
 						if(pPdoRx->DO[brdIdx]==0){
@@ -224,7 +265,9 @@ int64 toff = 0;
 							reverseDO[brdIdx] = FALSE;
 						}
 					}
+	#endif
 
+	#if 0
 					/*Re-init AO test values*/
 					for(brdIdx=0; brdIdx<NUM_SUBOBJ_AO; brdIdx++){
 						if(pPdoRx->AO[brdIdx]==0){
@@ -236,7 +279,8 @@ int64 toff = 0;
 
 					/* Walk to the next LED bit */
 					pPdoRx->led <<=1; 
-
+	#endif
+	#if 0
 					/* Walk to the next DO bits */
 					for(brdIdx=0; brdIdx<NUM_SUBOBJ_DO; brdIdx++){
 						if(pPdoRx->DO[brdIdx]==2){
@@ -255,13 +299,15 @@ int64 toff = 0;
 							reverseDO[brdIdx] = TRUE;
 						}
 					}
+	#endif
 
+	#if 0
 					/* Walk to the next AO values */
 					for(brdIdx=0; brdIdx<NUM_SUBOBJ_AO; brdIdx++){
 						/*Walk forward or backward(when reverse==TRUE) AOs*/
 						int32 v = (int32)pPdoRx->AO[brdIdx];
 						if(!reverseAO[brdIdx]){
-							v += 100;
+							v += 100; /*was=100*/
 							if(v>=0x8000){
 								v = 0x7fff;
 								reverseAO[brdIdx] = TRUE;
@@ -275,6 +321,7 @@ int64 toff = 0;
 						pPdoRx->AO[brdIdx] = (uint16)v;
 					}
 					i2 = i;
+	#endif
 				}
 #endif
 			   /*Send the PDOs*/
@@ -461,8 +508,6 @@ int main(int argc, char *argv[])
 	/*clpham: thread to handle stats printing*/
 	int ctime2;
 	osal_thread_create(&thread2, 128000, &showStats, (void*) &ctime2);
-
-
 
       /* start cyclic part */
       simpletest(argv[1]);
